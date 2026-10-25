@@ -1,0 +1,5 @@
+# GitHub Pages から公開するのは docs/ だけ。作業データ（scratch 等、数 GB）は追跡しない。
+/*
+!/.gitignore
+!/docs/
+.DS_Store

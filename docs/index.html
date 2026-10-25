@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>360toAvatar Lab</title>
+  <meta name="description" content="1 枚の絵から 3D アバターを作る実験の置き場。">
+  <link rel="icon" href="data:,">
+  <style>
+    :root { --bg: #f6f5f2; --fg: #1d1d1f; --sub: #6b6b70; --card: #fff; --line: #e3e1dc; --accent: #2a7f8f; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #151517; --fg: #ececee; --sub: #9a9aa2; --card: #1f1f23; --line: #2e2e33; --accent: #6cc4d3; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.7 system-ui, -apple-system, "Hiragino Sans", sans-serif; }
+    main { max-width: 960px; margin: 0 auto; padding: 48px 16px 64px; }
+    h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: 0.02em; }
+    .lead { color: var(--sub); margin: 0 0 32px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+    a.card { display: block; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; color: inherit; text-decoration: none; transition: transform .15s, border-color .15s; }
+    a.card:hover { transform: translateY(-2px); border-color: var(--accent); }
+    .card img { display: block; width: 100%; aspect-ratio: 8 / 5; object-fit: cover; background: #ddd; }
+    .card div { padding: 12px 16px 16px; }
+    .card h2 { font-size: 16px; margin: 0 0 4px; }
+    .card p { margin: 0; color: var(--sub); font-size: 13px; }
+    .date { color: var(--accent); font-size: 12px; font-variant-numeric: tabular-nums; }
+    footer { margin-top: 40px; color: var(--sub); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>360toAvatar Lab</h1>
+    <p class="lead">1 枚の絵 → 360 度の周回動画 → 3D アバター、の実験置き場。モデルは数十 MB あるので、開いてから表示まで少しかかります。</p>
+
+    <div class="grid">
+      <a class="card" href="./vrm-face-viewer/?model=./assets/tripo-face.vrm&amp;morph=./assets/tripo-male.vrm">
+        <img src="./thumbs/face-morph.jpg" alt="女性の顔と男性の顔を半分ずつ並べたもの" loading="lazy">
+        <div>
+          <span class="date">2026-10-25</span>
+          <h2>変身</h2>
+          <p>ボタン 1 つで別人の顔へうねりながら変わる。同じ素体に合わせた 2 つの顔の間を、頂点とテクスチャで補間。</p>
+        </div>
+      </a>
+      <a class="card" href="./vrm-face-viewer/">
+        <img src="./thumbs/perfect-sync.jpg" alt="写実寄りの女性の顔" loading="lazy">
+        <div>
+          <span class="date">2026-10-22</span>
+          <h2>パーフェクトシンク＋髪の Gaussian</h2>
+          <p>ARKit の 52 表情を持つ VRM。Web カメラのフェイストラッキングとリップシンクで動かせる。髪は 3D Gaussian。</p>
+        </div>
+      </a>
+    </div>
+
+    <footer>Web カメラの映像はブラウザの中だけで使い、外へは送りません。</footer>
+  </main>
+</body>
+</html>

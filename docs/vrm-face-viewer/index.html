@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VRM Face Viewer</title>
+  <meta name="description" content="リアル寄りの VRM を眺め、表情とリップシンクを試す小さなビューア。">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./style.css">
+  <script type="importmap">
+  {"imports":{
+    "three":"https://cdn.jsdelivr.net/npm/three@0.183.2/build/three.module.min.js",
+    "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.183.2/examples/jsm/",
+    "@pixiv/three-vrm":"https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.5.5/lib/three-vrm.module.min.js",
+    "@mediapipe/tasks-vision":"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs",
+    "@mkkellogg/gaussian-splats-3d":"https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.7/build/gaussian-splats-3d.module.js"
+  }}
+  </script>
+</head>
+<body>
+  <main class="app">
+    <section class="stage" aria-label="VRM の表示">
+      <canvas id="canvas" aria-label="ドラッグで回転、右ドラッグで移動、ホイールで拡大"></canvas>
+      <div class="status" id="status">読み込み中</div>
+      <video id="cam" class="cam" playsinline muted hidden></video>
+      <div class="hint">ドラッグ：回転　右ドラッグ：移動　ホイール：拡大　VRM をドロップで差し替え</div>
+    </section>
+
+    <aside class="panel">
+      <h1>VRM Face Viewer</h1>
+
+      <section>
+        <h2>視点</h2>
+        <div class="row">
+          <button data-view="face">顔</button>
+          <button data-view="bust">胸から上</button>
+          <button data-view="full">全身</button>
+        </div>
+      </section>
+
+      <section id="morph-panel" hidden>
+        <h2>変身</h2>
+        <div class="row"><button id="morph-go">変身する</button></div>
+        <label class="slider">進み具合 <input type="range" id="morph-progress" min="0" max="1" step="0.01" value="0"></label>
+        <label class="slider">かかる秒数 <input type="range" id="morph-duration" min="0.5" max="8" step="0.5" value="3"><output id="morph-duration-out">3.0</output></label>
+        <label class="slider">うねり <input type="range" id="morph-wobble" min="0" max="3" step="0.1" value="1"><output id="morph-wobble-out">1.0</output></label>
+        <p class="note" id="morph-status"></p>
+      </section>
+
+      <section>
+        <h2>表情</h2>
+        <div class="grid" id="expressions"></div>
+        <label class="slider">強さ <input type="range" id="exp-weight" min="0" max="1" step="0.05" value="1"><output id="exp-weight-out">1.00</output></label>
+        <label class="check"><input type="checkbox" id="auto-blink" checked> 自動でまばたき</label>
+        <label class="check"><input type="checkbox" id="idle" checked> 呼吸・揺れ</label>
+      </section>
+
+      <section>
+        <h2>フェイストラッキング</h2>
+        <div class="row">
+          <button id="track-start">カメラで動かす</button>
+          <button id="track-front">いまの顔を基準に</button>
+        </div>
+        <p class="note" id="track-status">Web カメラの顔の動きを、表情・首・目線に写す。映像は外に送らない。始めたら、正面を向いて力を抜いた顔で「いまの顔を基準に」を押す。</p>
+        <label class="check"><input type="checkbox" id="track-mirror" checked> 鏡のように動かす</label>
+        <label class="check"><input type="checkbox" id="track-head" checked> 首の向き</label>
+        <label class="check"><input type="checkbox" id="track-gaze" checked> 目線</label>
+        <label class="check"><input type="checkbox" id="track-video" checked> カメラ映像を表示</label>
+        <label class="slider">表情の強さ <input type="range" id="track-gain" min="1" max="2.5" step="0.1" value="1.4"><output id="track-gain-out">1.4</output></label>
+        <label class="slider">なめらかさ <input type="range" id="track-smooth" min="0" max="0.9" step="0.05" value="0.4"><output id="track-smooth-out">0.40</output></label>
+      </section>
+
+      <section>
+        <h2>表情を個別に</h2>
+        <div id="manual-exp" class="manual"></div>
+        <button id="manual-reset">すべて 0 に戻す</button>
+      </section>
+
+      <section>
+        <h2>リップシンク</h2>
+        <div class="row">
+          <button id="lip-sample">サンプル音声</button>
+          <button id="lip-file">音声ファイル</button>
+          <button id="lip-mic">マイク</button>
+          <button id="lip-stop">停止</button>
+        </div>
+        <input type="file" id="audio-input" accept="audio/*" hidden>
+        <div class="meter" aria-label="口の開き"><div id="meter-bar"></div></div>
+        <div class="vowels" id="vowels">
+          <span data-v="aa">あ</span><span data-v="ih">い</span><span data-v="ou">う</span><span data-v="ee">え</span><span data-v="oh">お</span>
+        </div>
+        <label class="slider">感度 <input type="range" id="lip-gain" min="0.5" max="4" step="0.1" value="1.8"><output id="lip-gain-out">1.8</output></label>
+        <label class="slider">口の大きさ <input type="range" id="lip-max" min="0.2" max="1" step="0.05" value="0.75"><output id="lip-max-out">0.75</output></label>
+      </section>
+
+      <section>
+        <h2>質感</h2>
+        <label class="check"><input type="checkbox" id="look-skin" checked> 肌（透け感・毛穴・光沢のむら）</label>
+        <label class="check"><input type="checkbox" id="look-eyes" checked> 目（まぶたの影・潤み）</label>
+        <label class="check"><input type="checkbox" id="hair-splats" checked> 髪（Gaussian、?hair= で指定したとき）</label>
+      </section>
+
+      <section>
+        <h2>照明</h2>
+        <label class="slider">明るさ <input type="range" id="exposure" min="0.4" max="2" step="0.05" value="1"><output id="exposure-out">1.00</output></label>
+        <label class="slider">環境光 <input type="range" id="env" min="0" max="1.5" step="0.05" value="0.6"><output id="env-out">0.60</output></label>
+      </section>
+
+      <section>
+        <h2>モデル</h2>
+        <button id="open-model">VRM を開く</button>
+        <input type="file" id="model-input" accept=".vrm,.glb" hidden>
+        <p class="note" id="model-name"></p>
+      </section>
+    </aside>
+  </main>
+  <audio id="audio" crossorigin="anonymous"></audio>
+  <script type="module" src="./viewer.js?v=3"></script>
+</body>
+</html>
