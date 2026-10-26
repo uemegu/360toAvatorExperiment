@@ -6,7 +6,8 @@ import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { createLook } from './look.js';
 import { createFaceTracker, findPerfectSync, applyPerfectSync, toPresets, boost } from './facetrack.js';
 import * as Splats from '@mkkellogg/gaussian-splats-3d';
-import { createMorph } from './morph.js';
+import { createMorph } from './morph.js?v=12';
+import { findHairMesh, createHairFX } from './hairfx.js?v=12';
 
 const params = new URLSearchParams(location.search);
 // default: the Japanese face with ARKit face units (perfect sync) and its Gaussian hair
@@ -103,6 +104,9 @@ async function loadModel(url, label) {
   scene.add(vrm.scene);
   relaxPose();
   vrm.update(0);
+  const hairMesh = findHairMesh(vrm.scene);
+  hairfx = hairMesh ? [createHairFX(hairMesh)].filter(Boolean) : [];
+  applyHairFX();
   const head = vrm.humanoid.getNormalizedBoneNode('head');
   headY = head ? head.getWorldPosition(new THREE.Vector3()).y : 1.5;
   for (const k of Object.keys(current)) delete current[k];
@@ -117,10 +121,11 @@ async function loadModel(url, label) {
   $('morph-panel').hidden = true;
   if (MORPH_URL && !label) {
     statusEl.textContent = '変身先を読み込み中';
-    const r = await morph.prepare(vrm, MORPH_URL).catch(showError);
+    const r = await morph.prepare(vrm, MORPH_URL, { companions: hairCompanions }).catch(showError);
     if (r) {
       $('morph-panel').hidden = false;
-      $('morph-status').textContent = `${r.moving} 個のメッシュが変形、${r.textures} 枚のテクスチャが入れ替わる` + (r.skipped ? `（頂点数が合わず ${r.skipped} 個は対象外）` : '');
+      $('morph-status').textContent = `${r.moving} 個のメッシュが変形、${r.textures} 枚のテクスチャが入れ替わる` +
+        (r.out || r.in ? `、頂点数の合わない ${r.out} 個は溶けて消え ${r.in} 個が現れる` : '');
     }
   }
   $('model-name').textContent = label || url;
@@ -195,7 +200,7 @@ const manual = {};
 function buildManualSliders() {
   const box = $('manual-exp');
   box.innerHTML = '';
-  for (const k of Object.keys(manual)) delete manual[k];
+  for (const k of Object.keys(manual)) { vrm?.expressionManager?.setValue(k, 0); delete manual[k]; }
   // only expressions that actually move something (presets with no binds are left out)
   const names = (vrm.expressionManager?.expressions || [])
     .filter((e) => (e._binds?.length ?? e.binds?.length ?? 1) > 0)
@@ -210,12 +215,16 @@ function buildManualSliders() {
     const input = label.querySelector('input');
     const out = label.querySelector('output');
     input.dataset.exp = name;
-    input.addEventListener('input', () => { manual[name] = +input.value; out.textContent = (+input.value).toFixed(2); });
+    input.addEventListener('input', () => {
+      manual[name] = +input.value;
+      out.textContent = (+input.value).toFixed(2);
+      if (!manual[name]) vrm?.expressionManager?.setValue(name, 0);   // nothing else resets the ARKit keys
+    });
     box.appendChild(label);
   }
 }
 $('manual-reset').addEventListener('click', () => {
-  for (const k of Object.keys(manual)) delete manual[k];
+  for (const k of Object.keys(manual)) { vrm?.expressionManager?.setValue(k, 0); delete manual[k]; }
   document.querySelectorAll('#manual-exp input').forEach((i) => { i.value = 0; i.nextElementSibling.textContent = '0.00'; });
   if (BASE_BLINK > 0) setManual('blink', BASE_BLINK);
 });
@@ -494,6 +503,7 @@ function tick() {
       $('morph-go').textContent = morph.target > 0.5 ? '元に戻る' : '変身する';
     }
     vrm.update(dt);
+    morph.updateSprings(dt);
   }
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
@@ -520,6 +530,27 @@ async function loadHair(url) {
   holder.visible = $('hair-splats').checked;
 }
 $('hair-splats').addEventListener('change', (e) => { if (hair) hair.holder.visible = e.target.checked; });
+
+// ---- mesh hair look (hairfx.js): ?hairfx=0 starts with both off ----
+let hairfx = [];   // the shown model's hair, plus the ?morph= model's hair once it is swapped in
+if (params.get('hairfx') === '0') $('hair-shader').checked = $('hair-cards').checked = false;
+function applyHairFX() {
+  for (const fx of hairfx) {
+    fx.setShader($('hair-shader').checked);
+    fx.setCards($('hair-cards').checked);
+  }
+}
+// morph.js swaps meshes it cannot morph; a hair mesh brings its cards and both of its materials along
+function hairCompanions(mesh, incoming) {
+  let fx = hairfx.find((f) => f.mesh === mesh);
+  if (!fx && incoming && findHairMesh(mesh) === mesh) {
+    fx = createHairFX(mesh);
+    if (fx) { hairfx.push(fx); applyHairFX(); }
+  }
+  return fx ? { meshes: [fx.cards], materials: [fx.orig, fx.shell] } : null;
+}
+$('hair-shader').addEventListener('change', applyHairFX);
+$('hair-cards').addEventListener('change', applyHairFX);
 
 // ---- shape-shift into ?morph= ----
 const morph = createMorph(loader, renderer);
@@ -594,6 +625,9 @@ window.viewer = {
     camera.updateProjectionMatrix();
   },
   setLook(skin, eyes) { $('look-skin').checked = skin; $('look-eyes').checked = eyes; applyLook(); },
+  setHair(shader, cards) { $('hair-shader').checked = shader; $('hair-cards').checked = cards; applyHairFX(); },
+  get hairfx() { return hairfx[0] || null; },
+  morph,
   get vrm() { return vrm; },
   tracker,
   get tracked() { return { ...tracked }; },
