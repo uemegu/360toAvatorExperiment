@@ -53,3 +53,10 @@ button.on { background: var(--accent); border-color: var(--accent); color: var(-
 
 .cam { position: absolute; top: 12px; right: 12px; width: 180px; border-radius: 6px; border: 1px solid var(--line); transform: scaleX(-1); background: #000; }
 #track-status.found { color: var(--ink); }
+
+details > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before { content: "▸"; color: var(--muted); font-size: 11px; transition: transform .15s; }
+details[open] > summary::before { transform: rotate(90deg); }
+details > summary h2 { margin: 0; }
+details[open] > summary { margin-bottom: 8px; }

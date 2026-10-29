@@ -8,12 +8,14 @@ import { createFaceTracker, findPerfectSync, applyPerfectSync, toPresets, boost 
 import * as Splats from '@mkkellogg/gaussian-splats-3d';
 import { createMorph } from './morph.js?v=12';
 import { findHairMesh, createHairFX } from './hairfx.js?v=12';
+import { createMotion } from './motion.js?v=2';
 
 const params = new URLSearchParams(location.search);
 // default: the Japanese face with ARKit face units (perfect sync) and its Gaussian hair
 const MODEL_URL = params.get('model') || './assets/bang-face-arkit.vrm';
 const HAIR_URL = params.get('hair') ?? (params.has('model') ? '' : './assets/bang-hair-v2.ply');
 const MORPH_URL = params.get('morph') || '';   // a second VRM with the same meshes to shape-shift into
+const MOTION = params.get('motion') || 'none';   // none | idle | walk
 const BASE_BLINK =params.has('blink') ? +params.get('blink') : 0;   // e.g. ?blink=0.1 lowers the lids a little
 const SAMPLE_VOICE = './assets/sample-voice.mp3';
 const MOUTH = ['aa', 'ih', 'ou', 'ee', 'oh'];
@@ -102,7 +104,9 @@ async function loadModel(url, label) {
   look.reset();
   applyLook();
   scene.add(vrm.scene);
+  applyStudio(studio);
   relaxPose();
+  motion.attach(vrm);
   vrm.update(0);
   const hairMesh = findHairMesh(vrm.scene);
   hairfx = hairMesh ? [createHairFX(hairMesh)].filter(Boolean) : [];
@@ -115,7 +119,7 @@ async function loadModel(url, label) {
   sync = findPerfectSync(vrm);
   showTrackStatus();
   if (BASE_BLINK > 0) setManual('blink', BASE_BLINK);
-  setView('bust');
+  setView(motion.name === 'walk' ? 'full' : 'bust');
   if (HAIR_URL && !label) await loadHair(HAIR_URL).catch(showError);
   morph.clear();
   $('morph-panel').hidden = true;
@@ -360,7 +364,7 @@ function analyseVoice() {
 // ---- idle motion ----
 let time = 0;
 function idle(dt) {
-  if (!$('idle').checked) return;
+  if (!$('idle').checked || motion.playing) return;   // a body motion has its own breathing and sway
   time += dt;
   const breath = Math.sin(time * 1.6);
   bone('spine')?.rotation.set(breath * 0.012, 0, 0);
@@ -472,6 +476,7 @@ function tick() {
   const dt = Math.min(clock.getDelta(), 0.1);
   if (!lockCamera) controls.update();
   if (vrm) {
+    motion.update(dt);
     idle(dt);
     const em = vrm.expressionManager;
     const level = analyseVoice();
@@ -582,6 +587,67 @@ $('env').addEventListener('input', (e) => {
   $('env-out').textContent = (+e.target.value).toFixed(2);
 });
 
+// ---- studio look (?studio=1): the Blender check renders' lighting (tripo/outfit/render_outfit.py) ----
+// a light grey world that also lights the scene from every side, one sun from the upper left front, AgX
+const STUDIO_GREY = new THREE.Color().setRGB(0.82, 0.83, 0.86, THREE.LinearSRGBColorSpace);
+const studioEnv = (() => {
+  const s = new THREE.Scene();
+  s.background = STUDIO_GREY;
+  return pmrem.fromScene(s, 0).texture;
+})();
+const studioSun = new THREE.DirectionalLight(0xffffff, 3);
+studioSun.position.set(-0.383, 0.643, 0.663).multiplyScalar(3);   // Blender sun (50°, 0, -30°) in three's Y-up frame
+studioSun.target.position.set(0, 0.8, 0);
+studioSun.castShadow = true;   // the sun's shadows (under the bust, the collar on the neck) give the renders their depth
+studioSun.shadow.mapSize.set(2048, 2048);
+Object.assign(studioSun.shadow.camera, { left: -1, right: 1, top: 1, bottom: -1, near: 0.5, far: 6 });
+studioSun.shadow.bias = -0.0003;
+studioSun.shadow.normalBias = 0.01;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const normal = {
+  background: scene.background, environment: scene.environment, toneMapping: renderer.toneMapping,
+  lights: [key, rim, ...scene.children.filter((o) => o.isHemisphereLight)],
+};
+function applyStudio(on) {
+  scene.background = on ? new THREE.Color('#bdbec3') : normal.background;   // the grey as the renders show it
+  scene.environment = on ? studioEnv : normal.environment;
+  scene.environmentIntensity = on ? 0.75 : +$('env').value;   // no ambient occlusion here, so a little less than Blender's 0.9
+  renderer.toneMapping = on ? THREE.AgXToneMapping : normal.toneMapping;
+  for (const l of normal.lights) l.visible = !on;
+  if (on) scene.add(studioSun, studioSun.target);
+  else scene.remove(studioSun, studioSun.target);
+  renderer.shadowMap.enabled = on;
+  vrm?.scene.traverse((o) => {
+    if (o.isMesh) o.castShadow = o.receiveShadow = on;
+  });
+  scene.traverse((o) => {
+    if (o.material) for (const m of [o.material].flat()) m.needsUpdate = true;   // shadow on/off recompiles
+  });
+}
+// studio by default; ?light=warm (or the old ?studio=0) for the warm key and rim lights
+let studio = !(params.get('light') === 'warm' || params.get('studio') === '0');
+function setLight(name) {
+  studio = name === 'studio';
+  document.querySelectorAll('[data-light]').forEach((b) => b.classList.toggle('on', b.dataset.light === name));
+  applyStudio(studio);
+}
+document.querySelectorAll('[data-light]').forEach((b) => b.addEventListener('click', () => setLight(b.dataset.light)));
+setLight(studio ? 'studio' : 'warm');
+
+// ---- body motion: still (breathing only), standing idle, walking in place ----
+const motion = createMotion();
+function setMotion(name) {
+  document.querySelectorAll('[data-motion]').forEach((b) => b.classList.toggle('on', b.dataset.motion === name));
+  motion.play(name);
+  if (vrm && name === 'none') {
+    vrm.humanoid.resetNormalizedPose();
+    relaxPose();
+  }
+  if (vrm && name === 'walk') setView('full');   // the legs are the point
+}
+document.querySelectorAll('[data-motion]').forEach((b) => b.addEventListener('click', () => setMotion(b.dataset.motion)));
+setMotion(MOTION);
+
 // ---- model file / drop ----
 function openFile(f) {
   if (f) loadModel(URL.createObjectURL(f), f.name).catch(showError);
@@ -627,7 +693,7 @@ window.viewer = {
   setLook(skin, eyes) { $('look-skin').checked = skin; $('look-eyes').checked = eyes; applyLook(); },
   setHair(shader, cards) { $('hair-shader').checked = shader; $('hair-cards').checked = cards; applyHairFX(); },
   get hairfx() { return hairfx[0] || null; },
-  morph,
+  morph, motion, setMotion, setLight,
   get vrm() { return vrm; },
   tracker,
   get tracked() { return { ...tracked }; },
