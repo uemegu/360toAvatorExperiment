@@ -7,7 +7,7 @@ import { createLook } from './look.js';
 import { createFaceTracker, findPerfectSync, applyPerfectSync, toPresets, boost } from './facetrack.js';
 import * as Splats from '@mkkellogg/gaussian-splats-3d';
 import { createMorph } from './morph.js?v=12';
-import { findHairMesh, createHairFX } from './hairfx.js?v=13';
+import { findHairMesh, createHairFX } from './hairfx.js?v=14';
 import { createMotion } from './motion.js?v=2';
 
 const params = new URLSearchParams(location.search);

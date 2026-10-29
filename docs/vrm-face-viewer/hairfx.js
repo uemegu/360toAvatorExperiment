@@ -20,6 +20,7 @@ export function findHairMesh(root) {
 export function createHairFX(mesh) {
   const orig = mesh.material;
   if (!orig.map?.image) return null;
+  fillGaps(orig);
   const pix = imagePixels(orig.map.image, ANALYSIS);
   const tensor = structureTensor(pix, ANALYSIS);
   const field = strandField(mesh, tensor);
@@ -38,6 +39,62 @@ export function createHairFX(mesh) {
       shell.dispose(); flow.dispose();
     },
   };
+}
+
+// ---- texture gaps: the Tripo texture is black outside its UV charts, and the seams (the partings and cracks of
+// the hair shell) sample that black into thin dark lines; fill the gaps with the charts' colours (push-pull) ----
+function fillGaps(m) {
+  const src = m.map, img = src.image;
+  const n = Math.min(Math.max(img.width, img.height), 4096);
+  const c = document.createElement('canvas');
+  c.width = c.height = n;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(img, 0, 0, n, n);
+  const im = g.getImageData(0, 0, n, n), d = im.data;
+  // levels of colour sums and weights; a texel is a gap when it is (near) pure black
+  const levels = [];
+  let size = n, col = new Float32Array(n * n * 3), wt = new Float32Array(n * n);
+  for (let i = 0; i < n * n; i++) {
+    if (Math.max(d[4 * i], d[4 * i + 1], d[4 * i + 2]) > 3) {
+      wt[i] = 1;
+      col[3 * i] = d[4 * i]; col[3 * i + 1] = d[4 * i + 1]; col[3 * i + 2] = d[4 * i + 2];
+    }
+  }
+  levels.push({ size, col, wt });
+  while (size > 1) {   // push: average the valid texels of each 2x2 block
+    const h = size >> 1, c2 = new Float32Array(h * h * 3), w2 = new Float32Array(h * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < h; x++) {
+      let r = 0, gg = 0, b = 0, w = 0;
+      for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+        const j = (2 * y + dy) * size + 2 * x + dx, ww = wt[j];
+        r += col[3 * j] * ww; gg += col[3 * j + 1] * ww; b += col[3 * j + 2] * ww; w += ww;
+      }
+      const k = y * h + x;
+      if (w > 0) { c2[3 * k] = r / w; c2[3 * k + 1] = gg / w; c2[3 * k + 2] = b / w; w2[k] = 1; }
+    }
+    size = h; col = c2; wt = w2;
+    levels.push({ size, col, wt });
+  }
+  for (let l = levels.length - 2; l >= 0; l--) {   // pull: a gap takes the coarser level's colour
+    const f = levels[l], cr = levels[l + 1];
+    for (let y = 0; y < f.size; y++) for (let x = 0; x < f.size; x++) {
+      const i = y * f.size + x;
+      if (f.wt[i]) continue;
+      const j = Math.min(y >> 1, cr.size - 1) * cr.size + Math.min(x >> 1, cr.size - 1);
+      f.col[3 * i] = cr.col[3 * j]; f.col[3 * i + 1] = cr.col[3 * j + 1]; f.col[3 * i + 2] = cr.col[3 * j + 2];
+      f.wt[i] = 1;
+    }
+  }
+  const top = levels[0];
+  for (let i = 0; i < n * n; i++) {
+    d[4 * i] = top.col[3 * i]; d[4 * i + 1] = top.col[3 * i + 1]; d[4 * i + 2] = top.col[3 * i + 2];
+  }
+  g.putImageData(im, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  for (const k of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'magFilter', 'minFilter', 'channel']) tex[k] = src[k];
+  tex.anisotropy = Math.max(src.anisotropy, 8);
+  m.map = tex;
+  m.needsUpdate = true;
 }
 
 // ---- texture analysis ----
@@ -343,6 +400,10 @@ function hairTerms(m, { streak = 0, cards = false } = {}) {
     Object.assign(sh.uniforms, m.userData.uniforms);
     let fs = sh.fragmentShader.replace('#include <common>', '#include <common>\nuniform float uStreak;\nuniform float uTrans;');
     if (cards) fs = fs.replace('float faceDirection = gl_FrontFacing ? 1.0 : - 1.0;', 'float faceDirection = 1.0;');
+    // edge-on, the strand bump tips the normal away from the eye (black rims round the bun): fade it out there
+    fs = fs.replace('#include <normal_fragment_maps>', THREE.ShaderChunk.normal_fragment_maps.replace(
+      'normal = perturbNormalArb( - vViewPosition, normal, dHdxy_fwd(), faceDirection );',
+      'normal = perturbNormalArb( - vViewPosition, normal, dHdxy_fwd() * smoothstep( 0.15, 0.5, abs( dot( normal, normalize( vViewPosition ) ) ) ), faceDirection );'));
     fs = fs.replace('#include <map_fragment>', `#include <map_fragment>
 #ifdef USE_BUMPMAP
 {
