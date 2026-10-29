@@ -1,7 +1,7 @@
 // Body motions baked into motion-data.js (bake-motions.mjs: Mixamo clips retargeted onto VRM normalized bones,
 // so no FBX ships with the page). Walking is played in place: the hips keep only their bob.
 import * as THREE from 'three';
-import { MOTION_DATA } from './motion-data.js?v=1';
+import { MOTION_DATA } from './motion-data.js?v=2';
 
 function decode(b64) {
   const bin = atob(b64), u8 = new Uint8Array(bin.length);

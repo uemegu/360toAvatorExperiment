@@ -8,14 +8,14 @@ import { createFaceTracker, findPerfectSync, applyPerfectSync, toPresets, boost 
 import * as Splats from '@mkkellogg/gaussian-splats-3d';
 import { createMorph } from './morph.js?v=12';
 import { findHairMesh, createHairFX } from './hairfx.js?v=14';
-import { createMotion } from './motion.js?v=2';
+import { createMotion } from './motion.js?v=3';
 
 const params = new URLSearchParams(location.search);
 // default: the Japanese face with ARKit face units (perfect sync) and its Gaussian hair
 const MODEL_URL = params.get('model') || './assets/bang-face-arkit.vrm';
 const HAIR_URL = params.get('hair') ?? (params.has('model') ? '' : './assets/bang-hair-v2.ply');
 const MORPH_URL = params.get('morph') || '';   // a second VRM with the same meshes to shape-shift into
-const MOTION = params.get('motion') || 'none';   // none | idle | walk
+const MOTION = params.get('motion') === 'walk' ? 'walk' : 'none';   // ?motion=walk
 const BASE_BLINK = params.has('blink') ? +params.get('blink') : 0.1;   // lids a little lowered by default (?blink=0 opens them)
 const SAMPLE_VOICE = './assets/sample-voice.mp3';
 const MOUTH = ['aa', 'ih', 'ou', 'ee', 'oh'];
@@ -105,6 +105,7 @@ async function loadModel(url, label) {
   applyLook();
   scene.add(vrm.scene);
   applyStudio(studio);
+  measurePosture();
   relaxPose();
   motion.attach(vrm);
   vrm.update(0);
@@ -141,9 +142,27 @@ function bone(name) {
   return vrm?.humanoid.getNormalizedBoneNode(name);
 }
 
+// The MPFB skeleton these models share puts the head joint 23° ahead of the neck joint, and at rest the neck reads as
+// craned forward. Lean past 12° is taken back at the neck, the head turned 60 % of it the other way so the face keeps
+// looking ahead; the idle sway and face tracking add their motion on top of this.
+const posture = { neck: 0, head: 0 };
+function measurePosture() {
+  posture.neck = posture.head = 0;
+  const n = vrm.humanoid.getRawBoneNode('neck'), h = vrm.humanoid.getRawBoneNode('head');
+  if (!n || !h) return;
+  vrm.scene.updateMatrixWorld(true);
+  const a = n.getWorldPosition(new THREE.Vector3()), b = h.getWorldPosition(new THREE.Vector3());
+  const lean = Math.atan2(b.z - a.z, b.y - a.y);   // + = forward (the model faces +z)
+  const fix = Math.max(0, lean - THREE.MathUtils.degToRad(12));
+  posture.neck = -fix;
+  posture.head = 0.6 * fix;
+}
+
 // Arms down from the T-pose, elbows and fingers a little bent (straight fingers read as a mannequin).
 function relaxPose() {
   const set = (name, x, y, z) => bone(name)?.rotation.set(x, y, z);
+  set('neck', posture.neck, 0, 0);
+  set('head', posture.head, 0, 0);
   set('leftUpperArm', 0, 0, -1.32);
   set('rightUpperArm', 0, 0, 1.32);
   set('leftLowerArm', 0, -0.35, 0);
@@ -370,8 +389,8 @@ function idle(dt) {
   bone('spine')?.rotation.set(breath * 0.012, 0, 0);
   bone('chest')?.rotation.set(breath * 0.01, 0, 0);
   if (tracking) return;   // the camera drives the neck and head
-  bone('neck')?.rotation.set(Math.sin(time * 0.5) * 0.02, Math.sin(time * 0.31) * 0.04, 0);
-  bone('head')?.rotation.set(Math.sin(time * 0.43 + 1) * 0.02, Math.sin(time * 0.27 + 2) * 0.05, Math.sin(time * 0.37) * 0.015);
+  bone('neck')?.rotation.set(posture.neck + Math.sin(time * 0.5) * 0.02, Math.sin(time * 0.31) * 0.04, 0);
+  bone('head')?.rotation.set(posture.head + Math.sin(time * 0.43 + 1) * 0.02, Math.sin(time * 0.27 + 2) * 0.05, Math.sin(time * 0.37) * 0.015);
 }
 
 // ---- face tracking (webcam) ----
@@ -439,8 +458,8 @@ function trackFace(dt) {
   const hy = smooth('yaw', found ? yaw : 0, dt);
   const hr = smooth('roll', found ? roll : 0, dt);
   if ($('track-head').checked) {
-    bone('neck')?.rotation.set(hp * 0.4, hy * 0.4, hr * 0.4);
-    bone('head')?.rotation.set(hp * 0.6, hy * 0.6, hr * 0.6);
+    bone('neck')?.rotation.set(posture.neck + hp * 0.4, hy * 0.4, hr * 0.4);
+    bone('head')?.rotation.set(posture.head + hp * 0.6, hy * 0.6, hr * 0.6);
   }
   if (sync?.count >= PERFECT_SYNC_MIN) {
     const s = {};
@@ -634,7 +653,7 @@ function setLight(name) {
 document.querySelectorAll('[data-light]').forEach((b) => b.addEventListener('click', () => setLight(b.dataset.light)));
 setLight(studio ? 'studio' : 'warm');
 
-// ---- body motion: still (breathing only), standing idle, walking in place ----
+// ---- body motion: still (breathing only) or walking in place ----
 const motion = createMotion();
 function setMotion(name) {
   document.querySelectorAll('[data-motion]').forEach((b) => b.classList.toggle('on', b.dataset.motion === name));
@@ -694,6 +713,7 @@ window.viewer = {
   setHair(shader, cards) { $('hair-shader').checked = shader; $('hair-cards').checked = cards; applyHairFX(); },
   get hairfx() { return hairfx[0] || null; },
   morph, motion, setMotion, setLight,
+  get posture() { return { ...posture }; },
   get vrm() { return vrm; },
   tracker,
   get tracked() { return { ...tracked }; },
