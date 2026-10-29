@@ -16,7 +16,7 @@ const MODEL_URL = params.get('model') || './assets/bang-face-arkit.vrm';
 const HAIR_URL = params.get('hair') ?? (params.has('model') ? '' : './assets/bang-hair-v2.ply');
 const MORPH_URL = params.get('morph') || '';   // a second VRM with the same meshes to shape-shift into
 const MOTION = params.get('motion') || 'none';   // none | idle | walk
-const BASE_BLINK =params.has('blink') ? +params.get('blink') : 0;   // e.g. ?blink=0.1 lowers the lids a little
+const BASE_BLINK = params.has('blink') ? +params.get('blink') : 0.1;   // lids a little lowered by default (?blink=0 opens them)
 const SAMPLE_VOICE = './assets/sample-voice.mp3';
 const MOUTH = ['aa', 'ih', 'ou', 'ee', 'oh'];
 const EMOTIONS = [
