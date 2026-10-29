@@ -368,7 +368,7 @@ function shellMaterial(orig, flow) {
     name: `${orig.name}+fx`, map: orig.map, color: orig.color, side: orig.side,
     roughness: HAIR.roughness, metalness: 0, specularIntensity: HAIR.specularIntensity,
     anisotropy: HAIR.anisotropy, anisotropyRotation: HAIR.anisotropyRotation,
-    bumpMap: flow, bumpScale: 1.5,
+    bumpMap: flow, bumpScale: 0.4,   // stronger, the noise aliases into black specks and moire where the hair is seen edge-on
     sheen: HAIR.sheen, sheenRoughness: HAIR.sheenRoughness, sheenColor: new THREE.Color(0.35, 0.3, 0.27),
   });
   return hairTerms(m, { streak: HAIR.streak });
