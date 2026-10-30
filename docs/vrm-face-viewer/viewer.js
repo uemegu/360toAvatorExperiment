@@ -12,8 +12,8 @@ import { createMotion } from './motion.js?v=3';
 
 const params = new URLSearchParams(location.search);
 // default: the Japanese face with ARKit face units (perfect sync) and its Gaussian hair
-const MODEL_URL = params.get('model') || './assets/bang-face-arkit.vrm';
-const HAIR_URL = params.get('hair') ?? (params.has('model') ? '' : './assets/bang-hair-v2.ply');
+const MODEL_URL = params.get('model') || './assets/tripo-female-outfit.vrm';   // the latest model; others by ?model=
+const HAIR_URL = params.get('hair') ?? '';
 const MORPH_URL = params.get('morph') || '';   // a second VRM with the same meshes to shape-shift into
 const MOTION = params.get('motion') === 'walk' ? 'walk' : 'none';   // ?motion=walk
 const BASE_BLINK = params.has('blink') ? +params.get('blink') : 0.1;   // lids a little lowered by default (?blink=0 opens them)
@@ -39,7 +39,7 @@ const statusEl = $('status');
 
 // ---- renderer / scene: lighting for physically based (non-toon) materials ----
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, +params.get('pr') || 2));   // ?pr=N lifts the cap (close-up measurements)
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.NeutralToneMapping;
 renderer.toneMappingExposure = 1;
@@ -715,6 +715,7 @@ window.viewer = {
   morph, motion, setMotion, setLight,
   get posture() { return { ...posture }; },
   get vrm() { return vrm; },
+  get camera() { return camera; },
   tracker,
   get tracked() { return { ...tracked }; },
   get sync() { return sync && { count: sync.count }; },

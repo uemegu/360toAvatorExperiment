@@ -5,13 +5,18 @@ import * as THREE from 'three';
 const SKIN = /body|skin|face/i;
 const EYE = /eye(?!lash|brow)|high-poly|iris/i;
 
-// Diffuse wrap per channel: red light reaches further past the terminator, as in skin.
+// Skin diffuse: light spreads under the skin, red furthest. Each channel sees the pore normal blended toward the
+// smooth surface normal (red mostly smooth, blue mostly pores), and a narrow tinted band spills past the terminator.
+// (The earlier per-channel wrap of 0.42/0.2/0.14 painted the whole shaded cheek orange under a side light.)
 const WRAP_DIFFUSE = `
 	#ifdef SKIN_WRAP
-		float nlw = dot( geometryNormal, directLight.direction );
-		vec3 wrapW = vec3( 0.42, 0.2, 0.14 );
-		vec3 wrapped = saturate( ( vec3( nlw ) + wrapW ) / ( 1.0 + wrapW ) );
-		reflectedLight.directDiffuse += wrapped * directLight.color * BRDF_Lambert( material.diffuseContribution );
+		float nlP = dot( geometryNormal, directLight.direction );
+		float nlS = dot( skinSmoothNormal, directLight.direction );
+		vec3 nlC = mix( vec3( nlP ), vec3( nlS ), vec3( 0.85, 0.55, 0.35 ) );
+		vec3 lam = saturate( nlC );
+		vec3 spill = saturate( ( nlC + vec3( 0.28, 0.12, 0.08 ) ) / vec3( 1.28, 1.12, 1.08 ) );
+		vec3 band = max( spill - lam, 0.0 ) * vec3( 0.55, 0.3, 0.22 );
+		reflectedLight.directDiffuse += ( lam + band ) * directLight.color * BRDF_Lambert( material.diffuseContribution );
 	#else
 		reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseContribution );
 	#endif`;
@@ -21,7 +26,8 @@ function skinChunk() {
   const chunk = THREE.ShaderChunk.lights_physical_pars_fragment;
   const at = chunk.lastIndexOf(DIFFUSE_LINE);
   if (at < 0) return null; // three changed: fall back to plain lighting
-  return chunk.slice(0, at) + WRAP_DIFFUSE + chunk.slice(at + DIFFUSE_LINE.length);
+  // the smooth normal is set in main() before the lights run (RE_Direct is a function, so it goes through a global)
+  return '#ifdef SKIN_WRAP\nvec3 skinSmoothNormal;\n#endif\n' + chunk.slice(0, at) + WRAP_DIFFUSE + chunk.slice(at + DIFFUSE_LINE.length);
 }
 
 // Tileable pore noise -> normal map (RGB) and roughness map (G).
@@ -102,7 +108,7 @@ function skinMaterial(m, pores, repeat) {
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <lights_physical_pars_fragment>', chunk)
         // glossy areas (lips) are smooth: fade the pore bumps out where the roughness map is low
-        .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize( mix( nonPerturbedNormal, normal, smoothstep( 0.3, 0.55, roughnessFactor ) ) );')
+        .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize( mix( nonPerturbedNormal, normal, smoothstep( 0.3, 0.55, roughnessFactor ) ) );\nskinSmoothNormal = nonPerturbedNormal;')
         .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
 #ifdef MATTE_HAIR
 {
