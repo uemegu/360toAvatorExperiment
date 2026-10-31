@@ -9,6 +9,8 @@ import * as Splats from '@mkkellogg/gaussian-splats-3d';
 import { createMorph } from './morph.js?v=12';
 import { findHairMesh, createHairFX } from './hairfx.js?v=14';
 import { createMotion } from './motion.js?v=3';
+import { createClothCPU } from './cloth-cpu.js?v=2';
+import { rigDress } from './cloth-rig.js?v=1';
 
 const params = new URLSearchParams(location.search);
 // default: the Japanese face with ARKit face units (perfect sync) and its Gaussian hair
@@ -78,6 +80,7 @@ new ResizeObserver(resize).observe(canvas);
 const loader = new GLTFLoader();
 loader.register((parser) => new VRMLoaderPlugin(parser));
 let vrm = null;
+let cloth = null;   // the skirt as cloth (cloth-cpu.js), when the model has a dress
 const look = createLook();
 let headY = 1.5;
 let lockCamera = false;   // set by viewer.setCamera (automated comparisons with a fixed camera)
@@ -104,6 +107,11 @@ async function loadModel(url, label) {
   look.reset();
   applyLook();
   scene.add(vrm.scene);
+  // the skirt as cloth, set up in the rest pose (before the posture and arm changes below, which leave the legs)
+  const rig = rigDress(vrm);
+  cloth = rig ? createClothCPU(rig.dress, rig.opts) : null;
+  $('cloth-row').hidden = !cloth;
+  if (cloth) cloth.uniforms.uFree.value = $('cloth').checked ? 1 : 0;
   applyStudio(studio);
   measurePosture();
   relaxPose();
@@ -527,6 +535,10 @@ function tick() {
       $('morph-go').textContent = morph.target > 0.5 ? '元に戻る' : '変身する';
     }
     vrm.update(dt);
+    if (cloth) {
+      vrm.scene.updateMatrixWorld(true);
+      cloth.update(dt);
+    }
     morph.updateSprings(dt);
   }
   renderer.render(scene, camera);
@@ -655,6 +667,7 @@ setLight(studio ? 'studio' : 'warm');
 
 // ---- body motion: still (breathing only) or walking in place ----
 const motion = createMotion();
+$('cloth').addEventListener('change', (e) => { if (cloth) cloth.uniforms.uFree.value = e.target.checked ? 1 : 0; });
 function setMotion(name) {
   document.querySelectorAll('[data-motion]').forEach((b) => b.classList.toggle('on', b.dataset.motion === name));
   motion.play(name);
@@ -715,6 +728,7 @@ window.viewer = {
   morph, motion, setMotion, setLight,
   get posture() { return { ...posture }; },
   get vrm() { return vrm; },
+  get cloth() { return cloth; },
   get camera() { return camera; },
   tracker,
   get tracked() { return { ...tracked }; },
